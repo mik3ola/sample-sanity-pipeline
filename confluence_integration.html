@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confluence Integration Guide</title>
+</head>
+<body>
+    <h1>Embedding Sanity Test Dashboard in Confluence</h1>
+    
+    <h2>Option 1: Using the HTML Macro</h2>
+    <p>Once your GitHub repository is set up and the dashboard is deployed to GitHub Pages, you can embed it in Confluence using the HTML macro:</p>
+    
+    <ol>
+        <li>In your Confluence page, click Edit</li>
+        <li>Place your cursor where you want to embed the dashboard</li>
+        <li>Type <code>/html</code> to search for the HTML macro</li>
+        <li>Select the HTML macro from the dropdown</li>
+        <li>Paste the following code (replace YOUR_USERNAME with your GitHub username):</li>
+    </ol>
+    
+    <pre>
+&lt;iframe 
+    src="https://YOUR_USERNAME.github.io/sample-sanity-pipeline/dashboard.html" 
+    width="100%" 
+    height="800px" 
+    frameborder="0"
+    allowfullscreen
+&gt;&lt;/iframe&gt;
+    </pre>
+    
+    <h2>Option 2: Using the Iframe Macro</h2>
+    <p>If your Confluence instance has the Iframe macro installed:</p>
+    
+    <ol>
+        <li>In your Confluence page, click Edit</li>
+        <li>Place your cursor where you want to embed the dashboard</li>
+        <li>Type <code>/iframe</code> to search for the Iframe macro</li>
+        <li>Select the Iframe macro from the dropdown</li>
+        <li>In the URL field, enter: <code>https://YOUR_USERNAME.github.io/sample-sanity-pipeline/dashboard.html</code></li>
+        <li>Set the width to 100% and height to 800px</li>
+        <li>Click Insert</li>
+    </ol>
+    
+    <h2>For the "Michael Ola" Workspace</h2>
+    <p>Since you mentioned you've created a workspace called "Michael Ola" in Confluence, you can add the dashboard to a page in that workspace using either of the methods above.</p>
+    
+    <h2>Security Considerations</h2>
+    <p>If your Confluence instance is behind a firewall or has Content Security Policy (CSP) restrictions, you may need to:</p>
+    <ul>
+        <li>Add the GitHub Pages domain to your allowed domains list</li>
+        <li>Consider using a proxy if direct access to GitHub Pages is not possible</li>
+        <li>Ensure your GitHub repository is public if embedding in a public Confluence page</li>
+    </ul>
+</body>
+</html>
