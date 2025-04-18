@@ -1,0 +1,380 @@
+name: Sanity Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          
+      - name: Run tests with Allure
+        run: |
+          mkdir -p allure-results
+          # Create Python 3.10 compatibility patch
+          cat > patch_collections.py << EOF
+          #!/usr/bin/env python3
+          # Patch for Python 3.10+ to run pytest with allure
+          import collections, collections.abc, sys
+          import pytest
+          import os
+
+          # Apply the patches for all needed classes
+          collections.Mapping = collections.abc.Mapping
+          collections.Sequence = collections.abc.Sequence
+          print("Patches applied: collections.Mapping and collections.Sequence")
+
+          # Create allure results directory
+          if not os.path.exists("allure-results"):
+              os.makedirs("allure-results")
+
+          # Run pytest with allure reporting
+          sys.exit(pytest.main(["tests/", "--alluredir=allure-results"]))
+          EOF
+          
+          # Run tests with our patch
+          python patch_collections.py
+        continue-on-error: true
+        
+      - name: Generate Allure report
+        uses: simple-elf/allure-report-action@master
+        if: always()
+        with:
+          allure_results: allure-results
+          allure_report: allure-report
+          
+      - name: Parse test metrics
+        if: always()
+        run: |
+          echo "Parsing test metrics..."
+          
+          # Get test results from Allure JSON files
+          TOTAL_TESTS=$(find allure-results -name "*.json" | grep -v "environment\|categories\|executor" | wc -l)
+          PASSED_TESTS=$(grep -l '"status":"passed"' allure-results/*.json | wc -l)
+          FAILED_TESTS=$((TOTAL_TESTS - PASSED_TESTS))
+          
+          # Calculate pass rate
+          if [ $TOTAL_TESTS -eq 0 ]; then
+            PASS_RATE=0
+          else
+            PASS_RATE=$(echo "scale=2; ($PASSED_TESTS * 100) / $TOTAL_TESTS" | bc)
+          fi
+          
+          # Get critical tests count
+          CRITICAL_TESTS=$(grep -l "critical_workflow" allure-results/*.json | wc -l)
+          
+          # Get test duration from GitHub Actions timing
+          START_TIME=$(date +%s)
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+          
+          # Create metrics JSON
+          cat > metrics.json << EOF
+          {
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "total_tests": $TOTAL_TESTS,
+            "passed_tests": $PASSED_TESTS,
+            "failed_tests": $FAILED_TESTS,
+            "pass_rate": $PASS_RATE,
+            "duration_seconds": $DURATION,
+            "critical_tests_count": $CRITICAL_TESTS,
+            "run_id": "${{ github.run_id }}",
+            "repository": "${{ github.repository }}",
+            "branch": "${{ github.ref }}"
+          }
+          EOF
+          
+          cat metrics.json
+          
+      - name: Upload metrics artifact
+        if: always()
+        uses: actions/upload-artifact@v2
+        with:
+          name: metrics
+          path: metrics.json
+          
+      - name: Deploy metrics to GitHub Pages
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          # Create metrics directory if it doesn't exist
+          mkdir -p metrics
+          
+          # Copy current metrics to metrics directory with timestamp
+          TIMESTAMP=$(date -u +"%Y%m%d%H%M%S")
+          cp metrics.json metrics/metrics_${TIMESTAMP}.json
+          
+          # Create or update metrics index
+          if [ -f metrics/index.json ]; then
+            # Add new metrics file to existing index
+            jq --arg file "metrics_${TIMESTAMP}.json" '.files += [$file]' metrics/index.json > metrics/index.json.new
+            mv metrics/index.json.new metrics/index.json
+          else
+            # Create new index
+            echo '{"files": ["metrics_'${TIMESTAMP}'.json"]}' > metrics/index.json
+          fi
+          
+          # Configure git for GitHub Pages
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # Create gh-pages branch if it doesn't exist
+          if ! git show-ref --quiet refs/heads/gh-pages; then
+            git checkout --orphan gh-pages
+            git rm -rf .
+            echo "# Sanity Test Metrics" > README.md
+            git add README.md
+            git commit -m "Initial gh-pages commit"
+            git push origin gh-pages
+          else
+            git fetch
+            git checkout gh-pages
+          fi
+          
+          # Copy metrics to gh-pages branch
+          cp -r metrics/* .
+          
+          # Create or update dashboard HTML
+          cat > dashboard.html << EOF
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Sanity Test Metrics Dashboard</title>
+            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 20px; }
+              .dashboard { display: flex; flex-wrap: wrap; }
+              .chart-container { width: 48%; margin: 1%; height: 300px; }
+              .metrics-table { width: 98%; margin: 1%; }
+              table { width: 100%; border-collapse: collapse; }
+              th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+              th { background-color: #f2f2f2; }
+              tr:nth-child(even) { background-color: #f9f9f9; }
+              @media (max-width: 768px) {
+                .chart-container { width: 98%; }
+              }
+            </style>
+          </head>
+          <body>
+            <h1>Sanity Test Metrics Dashboard</h1>
+            <div class="dashboard">
+              <div class="chart-container">
+                <canvas id="passRateChart"></canvas>
+              </div>
+              <div class="chart-container">
+                <canvas id="durationChart"></canvas>
+              </div>
+              <div class="chart-container">
+                <canvas id="testsChart"></canvas>
+              </div>
+              <div class="chart-container">
+                <canvas id="criticalChart"></canvas>
+              </div>
+              <div class="metrics-table">
+                <h2>Recent Test Runs</h2>
+                <table id="metricsTable">
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Total Tests</th>
+                      <th>Passed</th>
+                      <th>Failed</th>
+                      <th>Pass Rate</th>
+                      <th>Duration (s)</th>
+                      <th>Critical Tests</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tableBody"></tbody>
+                </table>
+              </div>
+            </div>
+            
+            <script>
+              // Fetch metrics data
+              async function fetchMetrics() {
+                try {
+                  const indexResponse = await fetch('index.json');
+                  const indexData = await indexResponse.json();
+                  
+                  const metricsData = [];
+                  for (const file of indexData.files) {
+                    const response = await fetch(file);
+                    const data = await response.json();
+                    metricsData.push(data);
+                  }
+                  
+                  // Sort by timestamp
+                  metricsData.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                  
+                  return metricsData;
+                } catch (error) {
+                  console.error('Error fetching metrics:', error);
+                  return [];
+                }
+              }
+              
+              // Create charts
+              async function createCharts() {
+                const metricsData = await fetchMetrics();
+                if (metricsData.length === 0) return;
+                
+                const timestamps = metricsData.map(d => {
+                  const date = new Date(d.timestamp);
+                  return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                });
+                
+                // Pass Rate Chart
+                new Chart(document.getElementById('passRateChart'), {
+                  type: 'pie',
+                  data: {
+                    labels: ['Passed', 'Failed'],
+                    datasets: [{
+                      data: [
+                        metricsData[metricsData.length-1].passed_tests,
+                        metricsData[metricsData.length-1].failed_tests
+                      ],
+                      backgroundColor: ['#4CAF50', '#F44336']
+                    }]
+                  },
+                  options: {
+                    responsive: true,
+                    plugins: {
+                      title: {
+                        display: true,
+                        text: 'Latest Pass/Fail Rate'
+                      }
+                    }
+                  }
+                });
+                
+                // Duration Chart
+                new Chart(document.getElementById('durationChart'), {
+                  type: 'line',
+                  data: {
+                    labels: timestamps,
+                    datasets: [{
+                      label: 'Duration (seconds)',
+                      data: metricsData.map(d => d.duration_seconds),
+                      borderColor: '#2196F3',
+                      tension: 0.1
+                    }]
+                  },
+                  options: {
+                    responsive: true,
+                    plugins: {
+                      title: {
+                        display: true,
+                        text: 'Test Duration Over Time'
+                      }
+                    }
+                  }
+                });
+                
+                // Tests Chart
+                new Chart(document.getElementById('testsChart'), {
+                  type: 'bar',
+                  data: {
+                    labels: timestamps,
+                    datasets: [
+                      {
+                        label: 'Passed Tests',
+                        data: metricsData.map(d => d.passed_tests),
+                        backgroundColor: '#4CAF50'
+                      },
+                      {
+                        label: 'Failed Tests',
+                        data: metricsData.map(d => d.failed_tests),
+                        backgroundColor: '#F44336'
+                      }
+                    ]
+                  },
+                  options: {
+                    responsive: true,
+                    plugins: {
+                      title: {
+                        display: true,
+                        text: 'Test Results Over Time'
+                      }
+                    },
+                    scales: {
+                      x: {
+                        stacked: true
+                      },
+                      y: {
+                        stacked: true
+                      }
+                    }
+                  }
+                });
+                
+                // Critical Tests Chart
+                new Chart(document.getElementById('criticalChart'), {
+                  type: 'line',
+                  data: {
+                    labels: timestamps,
+                    datasets: [{
+                      label: 'Critical Tests',
+                      data: metricsData.map(d => d.critical_tests_count),
+                      borderColor: '#FF9800',
+                      tension: 0.1
+                    }]
+                  },
+                  options: {
+                    responsive: true,
+                    plugins: {
+                      title: {
+                        display: true,
+                        text: 'Critical Tests Coverage'
+                      }
+                    }
+                  }
+                });
+                
+                // Populate table
+                const tableBody = document.getElementById('tableBody');
+                metricsData.slice(-10).reverse().forEach(metric => {
+                  const row = document.createElement('tr');
+                  
+                  const date = new Date(metric.timestamp);
+                  const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                  
+                  row.innerHTML = `
+                    <td>${formattedDate}</td>
+                    <td>${metric.total_tests}</td>
+                    <td>${metric.passed_tests}</td>
+                    <td>${metric.failed_tests}</td>
+                    <td>${metric.pass_rate}%</td>
+                    <td>${metric.duration_seconds}</td>
+                    <td>${metric.critical_tests_count}</td>
+                  `;
+                  
+                  tableBody.appendChild(row);
+                });
+              }
+              
+              // Initialize dashboard
+              createCharts();
+            </script>
+          </body>
+          </html>
+          EOF
+          
+          # Commit and push changes
+          git add .
+          git commit -m "Update metrics and dashboard"
+          git push origin gh-pages 
