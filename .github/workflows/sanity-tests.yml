@@ -27,29 +27,8 @@ jobs:
       - name: Run tests with Allure
         run: |
           mkdir -p allure-results
-          # Create Python 3.10 compatibility patch
-          cat > patch_collections.py << EOF
-          #!/usr/bin/env python3
-          # Patch for Python 3.10+ to run pytest with allure
-          import collections, collections.abc, sys
-          import pytest
-          import os
-
-          # Apply the patches for all needed classes
-          collections.Mapping = collections.abc.Mapping
-          collections.Sequence = collections.abc.Sequence
-          print("Patches applied: collections.Mapping and collections.Sequence")
-
-          # Create allure results directory
-          if not os.path.exists("allure-results"):
-              os.makedirs("allure-results")
-
-          # Run pytest with allure reporting
-          sys.exit(pytest.main(["tests/", "--alluredir=allure-results"]))
-          EOF
-          
-          # Run tests with our patch
-          python patch_collections.py
+          # Run tests directly with pytest and allure-pytest
+          python -m pytest tests/ --alluredir=allure-results
         continue-on-error: true
         
       - name: Store Allure results
