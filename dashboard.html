@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sanity Test Metrics Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .dashboard { display: flex; flex-wrap: wrap; }
+    .chart-container { width: 48%; margin: 1%; height: 300px; }
+    .metrics-table { width: 98%; margin: 1%; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    tr:nth-child(even) { background-color: #f9f9f9; }
+    @media (max-width: 768px) {
+      .chart-container { width: 98%; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Sanity Test Metrics Dashboard</h1>
+  <div class="dashboard">
+    <div class="chart-container">
+      <canvas id="passRateChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <canvas id="durationChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <canvas id="testsChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <canvas id="criticalChart"></canvas>
+    </div>
+    <div class="metrics-table">
+      <h2>Recent Test Runs</h2>
+      <table id="metricsTable">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Total Tests</th>
+            <th>Passed</th>
+            <th>Failed</th>
+            <th>Pass Rate</th>
+            <th>Duration (s)</th>
+            <th>Critical Tests</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+  
+  <script>
+    // Fetch metrics data
+    async function fetchMetrics() {
+      try {
+        const indexResponse = await fetch('index.json');
+        const indexData = await indexResponse.json();
+        
+        const metricsData = [];
+        for (const file of indexData.files) {
+          const response = await fetch(file);
+          const data = await response.json();
+          metricsData.push(data);
+        }
+        
+        // Sort by timestamp
+        metricsData.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        
+        return metricsData;
+      } catch (error) {
+        console.error('Error fetching metrics:', error);
+        return [];
+      }
+    }
+    
+    // Create charts
+    async function createCharts() {
+      const metricsData = await fetchMetrics();
+      if (metricsData.length === 0) return;
+      
+      const timestamps = metricsData.map(d => {
+        const date = new Date(d.timestamp);
+        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+      });
+      
+      // Pass Rate Chart
+      new Chart(document.getElementById('passRateChart'), {
+        type: 'pie',
+        data: {
+          labels: ['Passed', 'Failed'],
+          datasets: [{
+            data: [
+              metricsData[metricsData.length-1].passed_tests,
+              metricsData[metricsData.length-1].failed_tests
+            ],
+            backgroundColor: ['#4CAF50', '#F44336']
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: 'Latest Pass/Fail Rate'
+            }
+          }
+        }
+      });
+      
+      // Duration Chart
+      new Chart(document.getElementById('durationChart'), {
+        type: 'line',
+        data: {
+          labels: timestamps,
+          datasets: [{
+            label: 'Duration (seconds)',
+            data: metricsData.map(d => d.duration_seconds),
+            borderColor: '#2196F3',
+            tension: 0.1
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: 'Test Duration Over Time'
+            }
+          }
+        }
+      });
+      
+      // Tests Chart
+      new Chart(document.getElementById('testsChart'), {
+        type: 'bar',
+        data: {
+          labels: timestamps,
+          datasets: [
+            {
+              label: 'Passed Tests',
+              data: metricsData.map(d => d.passed_tests),
+              backgroundColor: '#4CAF50'
+            },
+            {
+              label: 'Failed Tests',
+              data: metricsData.map(d => d.failed_tests),
+              backgroundColor: '#F44336'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: 'Test Results Over Time'
+            }
+          },
+          scales: {
+            x: {
+              stacked: true
+            },
+            y: {
+              stacked: true
+            }
+          }
+        }
+      });
+      
+      // Critical Tests Chart
+      new Chart(document.getElementById('criticalChart'), {
+        type: 'line',
+        data: {
+          labels: timestamps,
+          datasets: [{
+            label: 'Critical Tests',
+            data: metricsData.map(d => d.critical_tests_count),
+            borderColor: '#FF9800',
+            tension: 0.1
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: 'Critical Tests Coverage'
+            }
+          }
+        }
+      });
+      
+      // Populate table
+      const tableBody = document.getElementById('tableBody');
+      metricsData.slice(-10).reverse().forEach(metric => {
+        const row = document.createElement('tr');
+        
+        const date = new Date(metric.timestamp);
+        const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+        
+        row.innerHTML = `
+          <td>${formattedDate}</td>
+          <td>${metric.total_tests}</td>
+          <td>${metric.passed_tests}</td>
+          <td>${metric.failed_tests}</td>
+          <td>${metric.pass_rate}%</td>
+          <td>${metric.duration_seconds}</td>
+          <td>${metric.critical_tests_count}</td>
+        `;
+        
+        tableBody.appendChild(row);
+      });
+    }
+    
+    // Initialize dashboard
+    createCharts();
+  </script>
+</body>
+</html>
