@@ -146,13 +146,13 @@ jobs:
           name: metrics
           path: metrics.json
           
-      - name: Deploy metrics to GitHub Pages
+      - name: Prepare metrics for deployment
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          # Create metrics directory if it doesn't exist
+          # Create metrics directory
           mkdir -p metrics
           
-          # Copy current metrics to metrics directory with timestamp
+          # Copy current metrics with timestamp
           TIMESTAMP=$(date -u +"%Y%m%d%H%M%S")
           cp metrics.json metrics/metrics_${TIMESTAMP}.json
           
@@ -166,28 +166,8 @@ jobs:
             echo '{"files": ["metrics_'${TIMESTAMP}'.json"]}' > metrics/index.json
           fi
           
-          # Configure git for GitHub Pages
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          
-          # Create gh-pages branch if it doesn't exist
-          if ! git show-ref --quiet refs/heads/gh-pages; then
-            git checkout --orphan gh-pages
-            git rm -rf .
-            echo "# Sanity Test Metrics" > README.md
-            git add README.md
-            git commit -m "Initial gh-pages commit"
-            git push origin gh-pages
-          else
-            git fetch
-            git checkout gh-pages
-          fi
-          
-          # Copy metrics to gh-pages branch
-          cp -r metrics/* .
-          
-          # Create or update dashboard HTML
-          cat > dashboard.html << EOF
+          # Create dashboard HTML
+          cat > metrics/dashboard.html << EOF
           <!DOCTYPE html>
           <html lang="en">
           <head>
@@ -413,12 +393,13 @@ jobs:
           </html>
           EOF
           
-          # Commit and push changes
-          git add .
-          git commit -m "Update metrics and dashboard"
-          git push origin gh-pages
-
-      - uses: peaceiris/actions-gh-pages@v3
+          # Copy summary for deployment
+          cp summary.html metrics/
+          
+      - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./allure-results
+          publish_dir: ./metrics
+          force_orphan: true
