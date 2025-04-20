@@ -27,8 +27,51 @@ jobs:
       - name: Run tests with Allure
         run: |
           mkdir -p allure-results
-          # Run tests directly with pytest and allure-pytest
-          python -m pytest tests/ --alluredir=allure-results
+          
+          # Create collections compatibility module
+          cat > collections_compat.py << EOF
+          """
+          Python 3.10 Compatibility Layer for collections.Mapping
+          
+          This module provides compatibility for code that relies on collections.Mapping,
+          which was removed in Python 3.10 in favor of collections.abc.Mapping.
+          """
+          
+          import collections
+          import collections.abc
+          import sys
+          
+          # Apply patches for collections module
+          if not hasattr(collections, 'Mapping'):
+              collections.Mapping = collections.abc.Mapping
+          
+          if not hasattr(collections, 'Sequence'):
+              collections.Sequence = collections.abc.Sequence
+          
+          print("Applied compatibility patches for collections module")
+          EOF
+          
+          # Create test runner script that imports compatibility layer first
+          cat > run_tests.py << EOF
+          import sys
+          import os
+          
+          # Import compatibility layer first
+          import collections_compat
+          
+          # Import pytest and run tests
+          import pytest
+          
+          # Create allure results directory
+          if not os.path.exists("allure-results"):
+              os.makedirs("allure-results")
+          
+          # Run pytest with allure reporting
+          sys.exit(pytest.main(["tests/", "--alluredir=allure-results"]))
+          EOF
+          
+          # Run tests with our compatibility layer
+          python run_tests.py
         continue-on-error: true
         
       - name: Store Allure results
@@ -38,7 +81,7 @@ jobs:
           echo "Allure results zipped"
           
           # Create a simple HTML summary
-          TOTAL=$(find allure-results -name "*.json" | grep -v "environment\|categories\|executor" | wc -l)
+          TOTAL=$(find allure-results -name "*.json" | grep -v "environment\|categories\|executor" | wc -l || echo 0)
           PASSED=$(grep -l '"status":"passed"' allure-results/*.json 2>/dev/null | wc -l || echo 0)
           FAILED=$((TOTAL - PASSED))
           
@@ -102,7 +145,7 @@ jobs:
           echo "Parsing test metrics..."
           
           # Get test results from Allure JSON files
-          TOTAL_TESTS=$(find allure-results -name "*.json" | grep -v "environment\|categories\|executor" | wc -l)
+          TOTAL_TESTS=$(find allure-results -name "*.json" | grep -v "environment\|categories\|executor" | wc -l || echo 0)
           PASSED_TESTS=$(grep -l '"status":"passed"' allure-results/*.json 2>/dev/null | wc -l || echo 0)
           FAILED_TESTS=$((TOTAL_TESTS - PASSED_TESTS))
           
@@ -149,24 +192,21 @@ jobs:
       - name: Prepare metrics for deployment
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          # Create metrics directory
+          # Debug information
+          echo "Current directory: $(pwd)"
+          echo "Listing files: $(ls -la)"
+          
+          # Create metrics directory if it doesn't exist
           mkdir -p metrics
           
-          # Copy current metrics with timestamp
+          # Copy current metrics to metrics directory with timestamp
           TIMESTAMP=$(date -u +"%Y%m%d%H%M%S")
           cp metrics.json metrics/metrics_${TIMESTAMP}.json
           
           # Create or update metrics index
-          if [ -f metrics/index.json ]; then
-            # Add new metrics file to existing index
-            jq --arg file "metrics_${TIMESTAMP}.json" '.files += [$file]' metrics/index.json > metrics/index.json.new
-            mv metrics/index.json.new metrics/index.json
-          else
-            # Create new index
-            echo '{"files": ["metrics_'${TIMESTAMP}'.json"]}' > metrics/index.json
-          fi
+          echo '{"files": ["metrics_'${TIMESTAMP}'.json"]}' > metrics/index.json
           
-          # Create dashboard HTML
+          # Create dashboard HTML in the metrics directory
           cat > metrics/dashboard.html << EOF
           <!DOCTYPE html>
           <html lang="en">
@@ -393,8 +433,12 @@ jobs:
           </html>
           EOF
           
-          # Copy summary for deployment
-          cp summary.html metrics/
+          # Create a simple test file to verify deployment
+          echo "Hello World" > metrics/test.txt
+          
+          # List the metrics directory to verify content
+          echo "Metrics directory content:"
+          ls -la metrics/
           
       - name: Deploy to GitHub Pages
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
