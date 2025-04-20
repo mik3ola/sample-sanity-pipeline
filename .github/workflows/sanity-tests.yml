@@ -189,25 +189,37 @@ jobs:
           name: metrics
           path: metrics.json
           
-      - name: Prepare metrics for deployment
+      - name: Create self-contained dashboard
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          # Debug information
-          echo "Current directory: $(pwd)"
-          echo "Listing files: $(ls -la)"
+          # Get test results from Allure JSON files
+          TOTAL_TESTS=$(find allure-results -name "*.json" | grep -v "environment\|categories\|executor" | wc -l || echo 0)
+          PASSED_TESTS=$(grep -l '"status":"passed"' allure-results/*.json 2>/dev/null | wc -l || echo 0)
+          FAILED_TESTS=$((TOTAL_TESTS - PASSED_TESTS))
           
-          # Create metrics directory if it doesn't exist
-          mkdir -p metrics
+          # Calculate pass rate
+          if [ $TOTAL_TESTS -eq 0 ]; then
+            PASS_RATE=0
+          else
+            PASS_RATE=$(echo "scale=2; ($PASSED_TESTS * 100) / $TOTAL_TESTS" | bc)
+          fi
           
-          # Copy current metrics to metrics directory with timestamp
-          TIMESTAMP=$(date -u +"%Y%m%d%H%M%S")
-          cp metrics.json metrics/metrics_${TIMESTAMP}.json
+          # Get critical tests count
+          CRITICAL_TESTS=$(grep -l "critical_workflow" allure-results/*.json 2>/dev/null | wc -l || echo 0)
           
-          # Create or update metrics index
-          echo '{"files": ["metrics_'${TIMESTAMP}'.json"]}' > metrics/index.json
+          # Get test duration from GitHub Actions timing
+          START_TIME=$(date +%s)
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
           
-          # Create dashboard HTML in the metrics directory
-          cat > metrics/dashboard.html << EOF
+          # Create timestamp
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          # Create a directory for GitHub Pages
+          mkdir -p public
+          
+          # Create a self-contained dashboard HTML file
+          cat > public/index.html << EOF
           <!DOCTYPE html>
           <html lang="en">
           <head>
@@ -224,6 +236,14 @@ jobs:
               th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
               th { background-color: #f2f2f2; }
               tr:nth-child(even) { background-color: #f9f9f9; }
+              .summary-cards { display: flex; gap: 20px; margin-bottom: 20px; }
+              .card { padding: 15px; border-radius: 8px; color: white; text-align: center; min-width: 100px; }
+              .total { background-color: #2196F3; }
+              .passed { background-color: #4CAF50; }
+              .failed { background-color: #F44336; }
+              .critical { background-color: #FF9800; }
+              .number { font-size: 24px; font-weight: bold; }
+              .label { font-size: 14px; }
               @media (max-width: 768px) {
                 .chart-container { width: 98%; }
               }
@@ -231,22 +251,36 @@ jobs:
           </head>
           <body>
             <h1>Sanity Test Metrics Dashboard</h1>
+            
+            <div class="summary-cards">
+              <div class="card total">
+                <div class="number">$TOTAL_TESTS</div>
+                <div class="label">Total Tests</div>
+              </div>
+              <div class="card passed">
+                <div class="number">$PASSED_TESTS</div>
+                <div class="label">Passed</div>
+              </div>
+              <div class="card failed">
+                <div class="number">$FAILED_TESTS</div>
+                <div class="label">Failed</div>
+              </div>
+              <div class="card critical">
+                <div class="number">$CRITICAL_TESTS</div>
+                <div class="label">Critical Tests</div>
+              </div>
+            </div>
+            
             <div class="dashboard">
               <div class="chart-container">
                 <canvas id="passRateChart"></canvas>
               </div>
               <div class="chart-container">
-                <canvas id="durationChart"></canvas>
-              </div>
-              <div class="chart-container">
                 <canvas id="testsChart"></canvas>
               </div>
-              <div class="chart-container">
-                <canvas id="criticalChart"></canvas>
-              </div>
               <div class="metrics-table">
-                <h2>Recent Test Runs</h2>
-                <table id="metricsTable">
+                <h2>Latest Test Run</h2>
+                <table>
                   <thead>
                     <tr>
                       <th>Timestamp</th>
@@ -258,192 +292,123 @@ jobs:
                       <th>Critical Tests</th>
                     </tr>
                   </thead>
-                  <tbody id="tableBody"></tbody>
+                  <tbody>
+                    <tr>
+                      <td>$TIMESTAMP</td>
+                      <td>$TOTAL_TESTS</td>
+                      <td>$PASSED_TESTS</td>
+                      <td>$FAILED_TESTS</td>
+                      <td>$PASS_RATE%</td>
+                      <td>$DURATION</td>
+                      <td>$CRITICAL_TESTS</td>
+                    </tr>
+                  </tbody>
                 </table>
               </div>
             </div>
             
             <script>
-              // Fetch metrics data
-              async function fetchMetrics() {
-                try {
-                  const indexResponse = await fetch('index.json');
-                  const indexData = await indexResponse.json();
-                  
-                  const metricsData = [];
-                  for (const file of indexData.files) {
-                    const response = await fetch(file);
-                    const data = await response.json();
-                    metricsData.push(data);
+              // Pass Rate Chart
+              new Chart(document.getElementById('passRateChart'), {
+                type: 'pie',
+                data: {
+                  labels: ['Passed', 'Failed'],
+                  datasets: [{
+                    data: [$PASSED_TESTS, $FAILED_TESTS],
+                    backgroundColor: ['#4CAF50', '#F44336']
+                  }]
+                },
+                options: {
+                  responsive: true,
+                  plugins: {
+                    title: {
+                      display: true,
+                      text: 'Test Pass/Fail Rate'
+                    }
                   }
-                  
-                  // Sort by timestamp
-                  metricsData.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-                  
-                  return metricsData;
-                } catch (error) {
-                  console.error('Error fetching metrics:', error);
-                  return [];
                 }
-              }
+              });
               
-              // Create charts
-              async function createCharts() {
-                const metricsData = await fetchMetrics();
-                if (metricsData.length === 0) return;
-                
-                const timestamps = metricsData.map(d => {
-                  const date = new Date(d.timestamp);
-                  return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-                });
-                
-                // Pass Rate Chart
-                new Chart(document.getElementById('passRateChart'), {
-                  type: 'pie',
-                  data: {
-                    labels: ['Passed', 'Failed'],
-                    datasets: [{
-                      data: [
-                        metricsData[metricsData.length-1].passed_tests,
-                        metricsData[metricsData.length-1].failed_tests
-                      ],
-                      backgroundColor: ['#4CAF50', '#F44336']
-                    }]
-                  },
-                  options: {
-                    responsive: true,
-                    plugins: {
-                      title: {
-                        display: true,
-                        text: 'Latest Pass/Fail Rate'
-                      }
-                    }
-                  }
-                });
-                
-                // Duration Chart
-                new Chart(document.getElementById('durationChart'), {
-                  type: 'line',
-                  data: {
-                    labels: timestamps,
-                    datasets: [{
-                      label: 'Duration (seconds)',
-                      data: metricsData.map(d => d.duration_seconds),
-                      borderColor: '#2196F3',
-                      tension: 0.1
-                    }]
-                  },
-                  options: {
-                    responsive: true,
-                    plugins: {
-                      title: {
-                        display: true,
-                        text: 'Test Duration Over Time'
-                      }
-                    }
-                  }
-                });
-                
-                // Tests Chart
-                new Chart(document.getElementById('testsChart'), {
-                  type: 'bar',
-                  data: {
-                    labels: timestamps,
-                    datasets: [
-                      {
-                        label: 'Passed Tests',
-                        data: metricsData.map(d => d.passed_tests),
-                        backgroundColor: '#4CAF50'
-                      },
-                      {
-                        label: 'Failed Tests',
-                        data: metricsData.map(d => d.failed_tests),
-                        backgroundColor: '#F44336'
-                      }
-                    ]
-                  },
-                  options: {
-                    responsive: true,
-                    plugins: {
-                      title: {
-                        display: true,
-                        text: 'Test Results Over Time'
-                      }
+              // Tests Chart
+              new Chart(document.getElementById('testsChart'), {
+                type: 'bar',
+                data: {
+                  labels: ['Test Results'],
+                  datasets: [
+                    {
+                      label: 'Passed Tests',
+                      data: [$PASSED_TESTS],
+                      backgroundColor: '#4CAF50'
                     },
-                    scales: {
-                      x: {
-                        stacked: true
-                      },
-                      y: {
-                        stacked: true
-                      }
+                    {
+                      label: 'Failed Tests',
+                      data: [$FAILED_TESTS],
+                      backgroundColor: '#F44336'
                     }
-                  }
-                });
-                
-                // Critical Tests Chart
-                new Chart(document.getElementById('criticalChart'), {
-                  type: 'line',
-                  data: {
-                    labels: timestamps,
-                    datasets: [{
-                      label: 'Critical Tests',
-                      data: metricsData.map(d => d.critical_tests_count),
-                      borderColor: '#FF9800',
-                      tension: 0.1
-                    }]
+                  ]
+                },
+                options: {
+                  responsive: true,
+                  plugins: {
+                    title: {
+                      display: true,
+                      text: 'Test Results'
+                    }
                   },
-                  options: {
-                    responsive: true,
-                    plugins: {
-                      title: {
-                        display: true,
-                        text: 'Critical Tests Coverage'
-                      }
+                  scales: {
+                    x: {
+                      stacked: true
+                    },
+                    y: {
+                      stacked: true
                     }
                   }
-                });
-                
-                // Populate table
-                const tableBody = document.getElementById('tableBody');
-                metricsData.slice(-10).reverse().forEach(metric => {
-                  const row = document.createElement('tr');
-                  
-                  const date = new Date(metric.timestamp);
-                  const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-                  
-                  row.innerHTML = \`
-                    <td>\${formattedDate}</td>
-                    <td>\${metric.total_tests}</td>
-                    <td>\${metric.passed_tests}</td>
-                    <td>\${metric.failed_tests}</td>
-                    <td>\${metric.pass_rate}%</td>
-                    <td>\${metric.duration_seconds}</td>
-                    <td>\${metric.critical_tests_count}</td>
-                  \`;
-                  
-                  tableBody.appendChild(row);
-                });
-              }
-              
-              // Initialize dashboard
-              createCharts();
+                }
+              });
             </script>
+            
+            <footer>
+              <p>Last updated: $TIMESTAMP</p>
+              <p>Repository: \${{ github.repository }}</p>
+              <p>Branch: \${{ github.ref }}</p>
+              <p>Run ID: \${{ github.run_id }}</p>
+            </footer>
           </body>
           </html>
           EOF
           
-          # Create a simple test file to verify deployment
-          echo "Hello World" > metrics/test.txt
+          # Create a dashboard.html file (for backward compatibility)
+          cp public/index.html public/dashboard.html
           
-          # List the metrics directory to verify content
-          echo "Metrics directory content:"
-          ls -la metrics/
+          # Create a simple README file
+          cat > public/README.md << EOF
+          # Sanity Test Metrics Dashboard
+          
+          This dashboard displays metrics from the sanity test pipeline.
+          
+          ## Available Pages
+          
+          - [Dashboard](index.html) - Main dashboard with test metrics
+          
+          ## Latest Test Run
+          
+          - **Total Tests:** $TOTAL_TESTS
+          - **Passed:** $PASSED_TESTS
+          - **Failed:** $FAILED_TESTS
+          - **Pass Rate:** $PASS_RATE%
+          - **Critical Tests:** $CRITICAL_TESTS
+          
+          Last updated: $TIMESTAMP
+          EOF
+          
+          # List the public directory to verify content
+          echo "Public directory content:"
+          ls -la public/
           
       - name: Deploy to GitHub Pages
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./metrics
+          publish_dir: ./public
           force_orphan: true
