@@ -166,59 +166,60 @@ jobs:
         run: |
           echo "Parsing test metrics from pytest output..."
           
-          # Display the last few lines of output which should contain the summary
-          echo "Test summary from output file:"
-          tail -n 20 pytest_output.txt
-          
-          # Extract the test summary line from pytest output - look for the standard pytest summary format
-          SUMMARY=$(grep -E "[0-9]+ failed, [0-9]+ passed" pytest_output.txt || 
-                   grep -E "[0-9]+ passed, [0-9]+ failed" pytest_output.txt ||
-                   grep "short test summary info" -A 5 pytest_output.txt || 
-                   echo "No summary found")
-          
-          echo "Extracted text containing summary: "
-          echo "$SUMMARY"
-          
-          # Parse the numbers from the summary
-          FAILED_TESTS=$(echo "$SUMMARY" | grep -Eo "[0-9]+ failed" | grep -Eo "[0-9]+" | head -1 || echo 0)
-          PASSED_TESTS=$(echo "$SUMMARY" | grep -Eo "[0-9]+ passed" | grep -Eo "[0-9]+" | head -1 || echo 0)
-          
-          # If we couldn't extract the numbers, try counting FAILED/PASSED lines in the output
-          if [ "$FAILED_TESTS" = "0" ] && [ "$PASSED_TESTS" = "0" ]; then
-            echo "Trying alternative method to count tests..."
-            FAILED_COUNT=$(grep -c "FAILED" pytest_output.txt || echo 0)
-            PASSED_LINE=$(grep "passed" pytest_output.txt | grep -v "FAILED" | head -1 || echo "")
-            
-            if [ -n "$FAILED_COUNT" ] && [ "$FAILED_COUNT" -gt 0 ]; then
-              FAILED_TESTS=$FAILED_COUNT
-            fi
-            
-            # Try to extract passed count from output
-            if [ -n "$PASSED_LINE" ]; then
-              PASSED_TESTS=$(echo "$PASSED_LINE" | grep -Eo "[0-9]+ passed" | grep -Eo "[0-9]+" || echo 0)
-            fi
+          # Count collected tests by looking at the collection line
+          COLLECTED=$(grep -o "collected [0-9]* item" pytest_output.txt | grep -o "[0-9]*" || echo 0)
+          if [ -z "$COLLECTED" ] || [ "$COLLECTED" = "0" ]; then
+            # Try alternative pattern
+            COLLECTED=$(grep -o "[0-9]* items collected" pytest_output.txt | grep -o "[0-9]*" || echo 0)
           fi
           
-          # Final fallback to known values if everything else fails
-          if [ "$FAILED_TESTS" = "0" ] && [ "$PASSED_TESTS" = "0" ]; then
-            # Use zero values to make the error obvious
-            FAILED_TESTS=0
-            PASSED_TESTS=0
-            echo "Unable to parse test counts. Using fallback values: $PASSED_TESTS passed, $FAILED_TESTS failed"
+          # Count failures and passed tests from summary line
+          SUMMARY=$(grep "= .* failed, .* passed" pytest_output.txt || 
+                   grep "= .* passed, .* failed" pytest_output.txt || echo "")
+          
+          if [ -n "$SUMMARY" ]; then
+            # Extract failed and passed from summary
+            FAILED_TESTS=$(echo "$SUMMARY" | grep -o "[0-9]* failed" | grep -o "[0-9]*" || echo 0)
+            PASSED_TESTS=$(echo "$SUMMARY" | grep -o "[0-9]* passed" | grep -o "[0-9]*" || echo 0)
           else
-            echo "Parsed counts: $PASSED_TESTS passed, $FAILED_TESTS failed"
+            # Count them another way - by counting actual FAILED/PASSED lines
+            FAILED_TESTS=$(grep -c "FAILED " pytest_output.txt || echo 0)
+            # Get total if we have it, otherwise count by pattern
+            if [ -n "$COLLECTED" ] && [ "$COLLECTED" != "0" ]; then
+              TOTAL_TESTS=$COLLECTED
+              PASSED_TESTS=$((TOTAL_TESTS - FAILED_TESTS))
+            else
+              # Count .F or .P characters in test progress output
+              DOTS_LINE=$(grep -o "\.\.\." pytest_output.txt | head -1 || echo "")
+              if [ -n "$DOTS_LINE" ]; then
+                # Count dots and F/P characters as tests
+                TOTAL_TESTS=$(echo "$DOTS_LINE" | wc -c)
+                PASSED_DOTS=$(echo "$DOTS_LINE" | grep -o "\." | wc -l || echo 0)
+                PASSED_TESTS=$PASSED_DOTS
+              else
+                # Last resort fallbacks
+                FAILED_TESTS=0
+                PASSED_TESTS=0
+              fi
+            fi
           fi
           
-          # Calculate total tests
-          TOTAL_TESTS=$((PASSED_TESTS + FAILED_TESTS))
+          # Set total tests based on passed and failed if not already set
+          if [ -z "$TOTAL_TESTS" ] || [ "$TOTAL_TESTS" = "0" ]; then
+            TOTAL_TESTS=$((PASSED_TESTS + FAILED_TESTS))
+          fi
           
-          # Get critical tests count from the pytest output
-          CRITICAL_TESTS=$(grep -c "critical_workflow" pytest_output.txt || echo 0)
+          # Count critical tests by checking for critical_workflow markers
+          CRITICAL_TESTS=$(grep -c "@pytest.mark.critical_workflow" pytest_output.txt || echo 0)
+          if [ "$CRITICAL_TESTS" = "0" ]; then
+            # Try alternative approach - look for test_critical in test names
+            CRITICAL_TESTS=$(grep -c "test_critical" pytest_output.txt || echo 0)
+          fi
           
-          # Check if critical_tests is reasonable, if not use fallback
+          # Sanity check to avoid unreasonable values
           if [ "$CRITICAL_TESTS" -gt "$TOTAL_TESTS" ]; then
-            CRITICAL_TESTS=1  # More reasonable fallback value
-            echo "Critical test count ($CRITICAL_TESTS) exceeds total tests, using fallback value: 1"
+            # Can't have more critical tests than total tests
+            CRITICAL_TESTS=$TOTAL_TESTS
           fi
           
           # Calculate pass rate
@@ -228,26 +229,22 @@ jobs:
             PASS_RATE=$(echo "scale=2; ($PASSED_TESTS * 100) / $TOTAL_TESTS" | bc)
           fi
           
-          # Get test duration from GitHub Actions timing
-          START_TIME=$(date +%s)
-          END_TIME=$(date +%s)
-          DURATION=$((END_TIME - START_TIME))
+          # Format timestamp
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           
-          # Create metrics JSON
-          cat > metrics.json << EOF
-          {
-            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-            "total_tests": $TOTAL_TESTS,
-            "passed_tests": $PASSED_TESTS,
-            "failed_tests": $FAILED_TESTS,
-            "pass_rate": $PASS_RATE,
-            "duration_seconds": $DURATION,
-            "critical_tests_count": $CRITICAL_TESTS,
-            "run_id": "${{ github.run_id }}",
-            "repository": "${{ github.repository }}",
-            "branch": "${{ github.ref }}"
-          }
-          EOF
+          # Create metrics JSON file
+          echo "{" > metrics.json
+          echo "  \"timestamp\": \"$TIMESTAMP\"," >> metrics.json
+          echo "  \"total_tests\": $TOTAL_TESTS," >> metrics.json
+          echo "  \"passed_tests\": $PASSED_TESTS," >> metrics.json
+          echo "  \"failed_tests\": $FAILED_TESTS," >> metrics.json
+          echo "  \"pass_rate\": $PASS_RATE," >> metrics.json
+          echo "  \"duration_seconds\": 0," >> metrics.json
+          echo "  \"critical_tests_count\": $CRITICAL_TESTS," >> metrics.json
+          echo "  \"run_id\": \"${{ github.run_id }}\"," >> metrics.json
+          echo "  \"repository\": \"${{ github.repository }}\"," >> metrics.json
+          echo "  \"branch\": \"${{ github.ref }}\"" >> metrics.json
+          echo "}" >> metrics.json
           
           echo "Created metrics.json with actual test results:"
           cat metrics.json
