@@ -175,12 +175,18 @@ jobs:
           
           # Count failures and passed tests from summary line
           SUMMARY=$(grep "= .* failed, .* passed" pytest_output.txt || 
-                   grep "= .* passed, .* failed" pytest_output.txt || echo "")
+                   grep "= .* passed, .* failed" pytest_output.txt || 
+                   grep "=* [0-9]* passed" pytest_output.txt || echo "")
           
           if [ -n "$SUMMARY" ]; then
             # Extract failed and passed from summary
             FAILED_TESTS=$(echo "$SUMMARY" | grep -o "[0-9]* failed" | grep -o "[0-9]*" || echo 0)
             PASSED_TESTS=$(echo "$SUMMARY" | grep -o "[0-9]* passed" | grep -o "[0-9]*" || echo 0)
+            
+            # If we only have "X passed" pattern (all tests passed)
+            if [ "$PASSED_TESTS" != "0" ] && [ -z "$FAILED_TESTS" ]; then
+              FAILED_TESTS=0
+            fi
           else
             # Count them another way - by counting actual FAILED/PASSED lines
             FAILED_TESTS=$(grep -c "FAILED " pytest_output.txt || echo 0)
@@ -189,17 +195,24 @@ jobs:
               TOTAL_TESTS=$COLLECTED
               PASSED_TESTS=$((TOTAL_TESTS - FAILED_TESTS))
             else
-              # Count .F or .P characters in test progress output
-              DOTS_LINE=$(grep -o "\.\.\." pytest_output.txt | head -1 || echo "")
-              if [ -n "$DOTS_LINE" ]; then
-                # Count dots and F/P characters as tests
-                TOTAL_TESTS=$(echo "$DOTS_LINE" | wc -c)
-                PASSED_DOTS=$(echo "$DOTS_LINE" | grep -o "\." | wc -l || echo 0)
-                PASSED_TESTS=$PASSED_DOTS
+              # Check if no failures means all passed
+              if [ "$FAILED_TESTS" = "0" ] && grep -q ".*=+ [0-9]* passed in .*" pytest_output.txt; then
+                # All tests passed, extract the number
+                PASSED_TESTS=$(grep ".*=+ [0-9]* passed in .*" pytest_output.txt | grep -o "[0-9]* passed" | grep -o "[0-9]*" || echo 0)
+                TOTAL_TESTS=$PASSED_TESTS
               else
-                # Last resort fallbacks
-                FAILED_TESTS=0
-                PASSED_TESTS=0
+                # Count .F or .P characters in test progress output
+                DOTS_LINE=$(grep -o "\.\.\." pytest_output.txt | head -1 || echo "")
+                if [ -n "$DOTS_LINE" ]; then
+                  # Count dots and F/P characters as tests
+                  TOTAL_TESTS=$(echo "$DOTS_LINE" | wc -c)
+                  PASSED_DOTS=$(echo "$DOTS_LINE" | grep -o "\." | wc -l || echo 0)
+                  PASSED_TESTS=$PASSED_DOTS
+                else
+                  # Last resort fallbacks
+                  FAILED_TESTS=0
+                  PASSED_TESTS=0
+                fi
               fi
             fi
           fi
@@ -208,6 +221,11 @@ jobs:
           if [ -z "$TOTAL_TESTS" ] || [ "$TOTAL_TESTS" = "0" ]; then
             TOTAL_TESTS=$((PASSED_TESTS + FAILED_TESTS))
           fi
+          
+          # Ensure we have valid numbers
+          TOTAL_TESTS=${TOTAL_TESTS:-0}
+          PASSED_TESTS=${PASSED_TESTS:-0}
+          FAILED_TESTS=${FAILED_TESTS:-0}
           
           # Count critical tests by checking for critical_workflow markers in a more precise way
           # Look for actual test definitions or failures of critical tests
