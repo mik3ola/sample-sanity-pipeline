@@ -305,6 +305,7 @@ jobs:
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Sanity Test Metrics Dashboard</title>
             <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
             <style>
               body { font-family: Arial, sans-serif; margin: 20px; }
               .dashboard { display: flex; flex-wrap: wrap; }
@@ -322,12 +323,80 @@ jobs:
               .critical { background-color: #FF9800; }
               .number { font-size: 24px; font-weight: bold; }
               .label { font-size: 14px; }
+              .back-button {
+                position: fixed;
+                top: 20px;
+                left: 20px;
+                padding: 10px 15px;
+                background-color: rgba(52, 152, 219, 0.9);
+                color: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                z-index: 1000;
+                cursor: pointer;
+                transition: background-color 0.3s ease;
+              }
+              .back-button:hover {
+                background-color: rgba(41, 128, 185, 1);
+              }
+              .back-button a {
+                color: white;
+                text-decoration: none;
+                display: flex;
+                align-items: center;
+                gap: 5px;
+              }
               @media (max-width: 768px) {
                 .chart-container { width: 98%; }
               }
             </style>
           </head>
           <body>
+            <div class="back-button" id="backButton" style="display: none;">
+              <a id="backLink" href="#"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+            </div>
+            
+            <script>
+              // Dynamic back button handling
+              document.addEventListener('DOMContentLoaded', function() {
+                const backButton = document.getElementById('backButton');
+                const backLink = document.getElementById('backLink');
+                
+                // Try different methods to find the hub URL
+                let hubUrl = '';
+                
+                // Method 1: Check if we have a referrer
+                if (document.referrer && document.referrer.includes('github.io')) {
+                  hubUrl = document.referrer;
+                } 
+                // Method 2: Check URL parameters
+                else {
+                  const urlParams = new URLSearchParams(window.location.search);
+                  const fromHub = urlParams.get('from');
+                  if (fromHub) {
+                    hubUrl = fromHub;
+                  }
+                }
+                
+                // Method 3: Fallback to a pattern based on current URL
+                if (!hubUrl) {
+                  // Extract organization name from current URL
+                  const currentUrl = window.location.href;
+                  const match = currentUrl.match(/https:\/\/(.*?)\.github\.io/);
+                  if (match && match[1]) {
+                    const orgName = match[1];
+                    hubUrl = `https://${orgName}.github.io/sanity-test-hub/`;
+                  }
+                }
+                
+                // If we found a hub URL, show the back button
+                if (hubUrl) {
+                  backLink.href = hubUrl;
+                  backButton.style.display = 'block';
+                }
+              });
+            </script>
+            
             <h1>Sanity Test Metrics Dashboard</h1>
             
             <div class="summary-cards">
