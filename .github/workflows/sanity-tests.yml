@@ -209,11 +209,12 @@ jobs:
             TOTAL_TESTS=$((PASSED_TESTS + FAILED_TESTS))
           fi
           
-          # Count critical tests by checking for critical_workflow markers
-          CRITICAL_TESTS=$(grep -c "@pytest.mark.critical_workflow" pytest_output.txt || echo 0)
+          # Count critical tests by checking for critical_workflow markers in a more precise way
+          # Look for actual test definitions or failures of critical tests
+          CRITICAL_TESTS=$(grep -E "^(FAILED|PASSED) .*test_critical" pytest_output.txt | wc -l || echo 0)
           if [ "$CRITICAL_TESTS" = "0" ]; then
-            # Try alternative approach - look for test_critical in test names
-            CRITICAL_TESTS=$(grep -c "test_critical" pytest_output.txt || echo 0)
+            # Try alternative approach - look for critical markers with the exact marker
+            CRITICAL_TESTS=$(grep -c "@pytest.mark.critical_workflow" pytest_output.txt || echo 0)
           fi
           
           # Sanity check to avoid unreasonable values

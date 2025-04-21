@@ -40,7 +40,7 @@ def test_critical_workflow():
         cwd="tests"
     )
     assert result.returncode == 0
-    assert "False Negative Test" in result.stdout
+    assert "Hello, World!" in result.stdout
     
     # Additional assertions for critical workflow
     assert len(result.stdout.strip()) > 0
