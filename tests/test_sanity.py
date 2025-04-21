@@ -13,7 +13,7 @@ def test_greet_success():
         cwd="tests"
     )
     assert result.returncode == 0
-    assert "Hello" in result.stdout
+    assert "failed" in result.stdout
     assert result.stderr == ""
 
 @allure.feature("Error Handling")
@@ -21,7 +21,7 @@ def test_failing_for_coverage():
     """Simulate a failing test for coverage demonstration."""
     # This test is intentionally designed to fail
     result = subprocess.run(
-        [sys.executable, "../app.py", "--greet"],
+        [sys.executable, "../app.py", "--non-existent-arg"],
         capture_output=True,
         text=True,
         cwd="tests"
@@ -40,7 +40,7 @@ def test_critical_workflow():
         cwd="tests"
     )
     assert result.returncode == 0
-    assert "Hello, World!" in result.stdout
+    assert "failed test" in result.stdout
     
     # Additional assertions for critical workflow
     assert len(result.stdout.strip()) > 0
