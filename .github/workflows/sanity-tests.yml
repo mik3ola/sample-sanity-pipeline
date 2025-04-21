@@ -150,7 +150,7 @@ jobs:
           import json
           import re
           import glob
-          
+
           # Get the summary from the pytest output
           summary_line = ''
           try:
@@ -176,7 +176,7 @@ jobs:
                   passed_tests = int(match.group(1))
                   failed_tests = int(match.group(2))
                   total_tests = passed_tests + failed_tests
-          
+
           # Try to count from test files as a backup
           try:
               test_files = glob.glob('tests/test_*.py')
@@ -191,7 +191,7 @@ jobs:
                   total_tests = file_total_tests
           except:
               pass
-          
+
           # Count critical tests
           try:
               test_files = glob.glob('tests/test_*.py')
@@ -207,13 +207,13 @@ jobs:
                   critical_tests = critical_count
           except:
               pass
-          
+
           # Calculate pass rate
           pass_rate = 0 if total_tests == 0 else round((passed_tests * 100) / total_tests, 2)
-          
+
           # Get test duration
           duration = 0
-          
+
           # Create metrics JSON
           metrics = {
               'timestamp': os.popen('date -u +"%Y-%m-%dT%H:%M:%SZ"').read().strip(),
@@ -227,11 +227,11 @@ jobs:
               'repository': os.environ.get('GITHUB_REPOSITORY', ''),
               'branch': os.environ.get('GITHUB_REF', '')
           }
-          
+
           # Write metrics to file
           with open('metrics.json', 'w') as f:
               json.dump(metrics, f, indent=2)
-          
+
           print(f'Metrics JSON created with {passed_tests} passed and {failed_tests} failed tests')
           print(json.dumps(metrics, indent=2))
           EOF
