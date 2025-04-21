@@ -13,7 +13,7 @@ def test_greet_success():
         cwd="tests"
     )
     assert result.returncode == 0
-    assert "Hello, World!" in result.stdout
+    assert "False Negative Test" in result.stdout
     assert result.stderr == ""
 
 @allure.feature("Error Handling")

@@ -71,11 +71,24 @@ jobs:
           EOF
           
           # Run tests with our compatibility layer and save output
-          python run_tests.py > pytest_output.txt 2>&1
-          
-          # Display the output for debugging
-          cat pytest_output.txt
+          python run_tests.py 2>&1 | tee pytest_output.txt
         continue-on-error: true
+        
+      - name: Display test output
+        if: always()
+        run: |
+          echo "==== TEST OUTPUT START ===="
+          cat pytest_output.txt
+          echo "==== TEST OUTPUT END ===="
+          
+          # Check if the file exists and has content
+          if [ -s pytest_output.txt ]; then
+            echo "Test output file exists and has content"
+          else
+            echo "Test output file is missing or empty!"
+            # Create a minimal output file for downstream steps
+            echo "No test output captured. Tests may have failed to start." > pytest_output.txt
+          fi
         
       - name: Store Allure results
         if: always()
