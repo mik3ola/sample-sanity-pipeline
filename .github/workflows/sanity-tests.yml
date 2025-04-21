@@ -71,7 +71,13 @@ jobs:
           EOF
           
           # Run tests with our compatibility layer and save output
-          python run_tests.py 2>&1 | tee pytest_output.txt
+          python run_tests.py > pytest_output.txt 2>&1
+          
+          # Check test output for issues
+          if [ ! -s pytest_output.txt ]; then
+            echo "Warning: Test output file is empty or missing!"
+            echo "No test output captured. Tests may have failed to start." > pytest_output.txt
+          fi
         continue-on-error: true
         
       - name: Display test output
@@ -160,20 +166,60 @@ jobs:
         run: |
           echo "Parsing test metrics from pytest output..."
           
-          # Extract the test summary line from pytest output
-          SUMMARY=$(grep -o '[0-9]\+ failed, [0-9]\+ passed' pytest_output.txt || echo "0 failed, 0 passed")
-          echo "Extracted summary: $SUMMARY"
+          # Display the last few lines of output which should contain the summary
+          echo "Test summary from output file:"
+          tail -n 20 pytest_output.txt
+          
+          # Extract the test summary line from pytest output - look for the standard pytest summary format
+          SUMMARY=$(grep -E "[0-9]+ failed, [0-9]+ passed" pytest_output.txt || 
+                   grep -E "[0-9]+ passed, [0-9]+ failed" pytest_output.txt ||
+                   grep "short test summary info" -A 5 pytest_output.txt || 
+                   echo "No summary found")
+          
+          echo "Extracted text containing summary: "
+          echo "$SUMMARY"
           
           # Parse the numbers from the summary
-          FAILED_TESTS=$(echo $SUMMARY | grep -o '[0-9]\+ failed' | grep -o '[0-9]\+' || echo 0)
-          PASSED_TESTS=$(echo $SUMMARY | grep -o '[0-9]\+ passed' | grep -o '[0-9]\+' || echo 0)
-          echo "Parsed counts: $PASSED_TESTS passed, $FAILED_TESTS failed"
+          FAILED_TESTS=$(echo "$SUMMARY" | grep -Eo "[0-9]+ failed" | grep -Eo "[0-9]+" | head -1 || echo 0)
+          PASSED_TESTS=$(echo "$SUMMARY" | grep -Eo "[0-9]+ passed" | grep -Eo "[0-9]+" | head -1 || echo 0)
+          
+          # If we couldn't extract the numbers, try counting FAILED/PASSED lines in the output
+          if [ "$FAILED_TESTS" = "0" ] && [ "$PASSED_TESTS" = "0" ]; then
+            echo "Trying alternative method to count tests..."
+            FAILED_COUNT=$(grep -c "FAILED" pytest_output.txt || echo 0)
+            PASSED_LINE=$(grep "passed" pytest_output.txt | grep -v "FAILED" | head -1 || echo "")
+            
+            if [ -n "$FAILED_COUNT" ] && [ "$FAILED_COUNT" -gt 0 ]; then
+              FAILED_TESTS=$FAILED_COUNT
+            fi
+            
+            # Try to extract passed count from output
+            if [ -n "$PASSED_LINE" ]; then
+              PASSED_TESTS=$(echo "$PASSED_LINE" | grep -Eo "[0-9]+ passed" | grep -Eo "[0-9]+" || echo 0)
+            fi
+          fi
+          
+          # Final fallback to known values if everything else fails
+          if [ "$FAILED_TESTS" = "0" ] && [ "$PASSED_TESTS" = "0" ]; then
+            # Use zero values to make the error obvious
+            FAILED_TESTS=0
+            PASSED_TESTS=0
+            echo "Unable to parse test counts. Using fallback values: $PASSED_TESTS passed, $FAILED_TESTS failed"
+          else
+            echo "Parsed counts: $PASSED_TESTS passed, $FAILED_TESTS failed"
+          fi
           
           # Calculate total tests
           TOTAL_TESTS=$((PASSED_TESTS + FAILED_TESTS))
           
           # Get critical tests count from the pytest output
           CRITICAL_TESTS=$(grep -c "critical_workflow" pytest_output.txt || echo 0)
+          
+          # Check if critical_tests is reasonable, if not use fallback
+          if [ "$CRITICAL_TESTS" -gt "$TOTAL_TESTS" ]; then
+            CRITICAL_TESTS=1  # More reasonable fallback value
+            echo "Critical test count ($CRITICAL_TESTS) exceeds total tests, using fallback value: 1"
+          fi
           
           # Calculate pass rate
           if [ $TOTAL_TESTS -eq 0 ]; then
