@@ -352,8 +352,8 @@ jobs:
             </style>
           </head>
           <body>
-            <div class="back-button" id="backButton" style="display: none;">
-              <a id="backLink" href="#"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+            <div class="back-button" id="backButton">
+              <a href="https://mik3ola.github.io/sanity-test-hub/"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
             </div>
             
             <script>
