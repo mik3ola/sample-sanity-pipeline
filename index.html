@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sanity Test Metrics Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; padding-top: 50px; }
+    .dashboard { display: flex; flex-wrap: wrap; }
+    .chart-container { width: 48%; margin: 1%; height: 300px; }
+    .metrics-table { width: 98%; margin: 1%; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    tr:nth-child(even) { background-color: #f9f9f9; }
+    .summary-cards { display: flex; gap: 20px; margin-bottom: 20px; }
+    .card { padding: 15px; border-radius: 8px; color: white; text-align: center; min-width: 100px; }
+    .total { background-color: #2196F3; }
+    .passed { background-color: #4CAF50; }
+    .failed { background-color: #F44336; }
+    .critical { background-color: #FF9800; }
+    .number { font-size: 24px; font-weight: bold; }
+    .label { font-size: 14px; }
+    .back-button {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      padding: 10px 15px;
+      background-color: rgba(52, 152, 219, 0.9);
+      color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+      z-index: 1000;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    .back-button:hover {
+      background-color: rgba(41, 128, 185, 1);
+    }
+    .back-button a {
+      color: white;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    @media (max-width: 768px) {
+      .chart-container { width: 98%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="back-button" id="backButton">
+    <a href="https://mik3ola.github.io/sanity-test-hub/"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+  </div>
+  
+  <script>
+    // Dynamic back button handling
+    document.addEventListener('DOMContentLoaded', function() {
+      const backButton = document.getElementById('backButton');
+      const backLink = document.getElementById('backLink');
+      
+      // Try different methods to find the hub URL
+      let hubUrl = '';
+      
+      // Method 1: Check if we have a referrer
+      if (document.referrer && document.referrer.includes('github.io')) {
+        hubUrl = document.referrer;
+      } 
+      // Method 2: Check URL parameters
+      else {
+        const urlParams = new URLSearchParams(window.location.search);
+        const fromHub = urlParams.get('from');
+        if (fromHub) {
+          hubUrl = fromHub;
+        }
+      }
+      
+      // Method 3: Fallback to a pattern based on current URL
+      if (!hubUrl) {
+        // Extract organization name from current URL
+        const currentUrl = window.location.href;
+        const match = currentUrl.match(/https:\/\/(.*?)\.github\.io/);
+        if (match && match[1]) {
+          const orgName = match[1];
+          hubUrl = ;
+        }
+      }
+      
+      // If we found a hub URL, show the back button
+      if (hubUrl) {
+        backLink.href = hubUrl;
+        backButton.style.display = 'block';
+      }
+    });
+  </script>
+  
+  <h1>Sanity Test Metrics Dashboard</h1>
+  
+  <div class="summary-cards">
+    <div class="card total">
+      <div class="number">3</div>
+      <div class="label">Total Tests</div>
+    </div>
+    <div class="card passed">
+      <div class="number">2</div>
+      <div class="label">Passed</div>
+    </div>
+    <div class="card failed">
+      <div class="number">1</div>
+      <div class="label">Failed</div>
+    </div>
+    <div class="card critical">
+      <div class="number">1</div>
+      <div class="label">Critical Tests</div>
+    </div>
+  </div>
+  
+  <div class="dashboard">
+    <div class="chart-container">
+      <canvas id="passRateChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <canvas id="testsChart"></canvas>
+    </div>
+    <div class="metrics-table">
+      <h2>Latest Test Run</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Total Tests</th>
+            <th>Passed</th>
+            <th>Failed</th>
+            <th>Pass Rate</th>
+            <th>Duration (s)</th>
+            <th>Critical Tests</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>2025-04-21 14:19:51 UTC</td>
+            <td>3</td>
+            <td>2</td>
+            <td>1</td>
+            <td>66.66%</td>
+            <td>0</td>
+            <td>1</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  
+  <script>
+    // Pass Rate Chart
+    new Chart(document.getElementById('passRateChart'), {
+      type: 'pie',
+      data: {
+        labels: ['Passed', 'Failed'],
+        datasets: [{
+          data: [2, 1],
+          backgroundColor: ['#4CAF50', '#F44336']
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          title: {
+            display: true,
+            text: 'Test Pass/Fail Rate'
+          }
+        }
+      }
+    });
+    
+    // Tests Chart
+    new Chart(document.getElementById('testsChart'), {
+      type: 'bar',
+      data: {
+        labels: ['Test Results'],
+        datasets: [
+          {
+            label: 'Passed Tests',
+            data: [2],
+            backgroundColor: '#4CAF50'
+          },
+          {
+            label: 'Failed Tests',
+            data: [1],
+            backgroundColor: '#F44336'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          title: {
+            display: true,
+            text: 'Test Results'
+          }
+        },
+        scales: {
+          x: {
+            stacked: true
+          },
+          y: {
+            stacked: true
+          }
+        }
+      }
+    });
+  </script>
+  
+  <footer>
+    <p>Last updated: 2025-04-21 14:19:51 UTC</p>
+    <p>Repository: \mik3ola/sample-sanity-pipeline</p>
+    <p>Branch: \refs/heads/main</p>
+    <p>Run ID: \14575072213</p>
+  </footer>
+</body>
+</html>

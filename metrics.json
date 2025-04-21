@@ -1,0 +1,12 @@
+{
+  "timestamp": "2025-04-21T14:19:51Z",
+  "total_tests": 3,
+  "passed_tests": 2,
+  "failed_tests": 1,
+  "pass_rate": 66.66,
+  "duration_seconds": 0,
+  "critical_tests_count": 1,
+  "run_id": "14575072213",
+  "repository": "mik3ola/sample-sanity-pipeline",
+  "branch": "refs/heads/main"
+}
