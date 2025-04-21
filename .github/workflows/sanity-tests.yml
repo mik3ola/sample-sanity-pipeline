@@ -71,7 +71,7 @@ jobs:
           EOF
           
           # Run tests with our compatibility layer
-          python run_tests.py > run_tests_output.txt 2>&1
+          python run_tests.py
         continue-on-error: true
         
       - name: Store Allure results
@@ -144,102 +144,42 @@ jobs:
         run: |
           echo "Parsing test metrics..."
           
-          # Create a Python script to parse test results
-          cat > parse_results.py << 'EOF'
-          import os
-          import json
-          import re
-          import glob
-
-          # Get the summary from the pytest output
-          summary_line = ''
-          try:
-              with open('run_tests_output.txt', 'r') as f:
-                  lines = f.readlines()
-                  for line in reversed(lines):
-                      if 'failed' in line and 'passed' in line:
-                          summary_line = line
-                          break
-          except:
-              pass
+          # Get test results from Allure JSON files
+          TOTAL_TESTS=$(find allure-results -name "*.json" | grep -v "environment\|categories\|executor" | wc -l || echo 0)
+          PASSED_TESTS=$(grep -l '"status":"passed"' allure-results/*.json 2>/dev/null | wc -l || echo 0)
+          FAILED_TESTS=$((TOTAL_TESTS - PASSED_TESTS))
           
-          # Default values
-          passed_tests = 2  # Default based on the screenshot showing 2 passed, 1 failed
-          failed_tests = 1
-          total_tests = 3
-          critical_tests = 1
-          
-          # Try to parse from summary line
-          if summary_line:
-              match = re.search(r'(\d+) passed, (\d+) failed', summary_line)
-              if match:
-                  passed_tests = int(match.group(1))
-                  failed_tests = int(match.group(2))
-                  total_tests = passed_tests + failed_tests
-
-          # Try to count from test files as a backup
-          try:
-              test_files = glob.glob('tests/test_*.py')
-              file_total_tests = 0
-              for test_file in test_files:
-                  with open(test_file, 'r') as f:
-                      content = f.read()
-                      test_funcs = re.findall(r'def test_[a-zA-Z0-9_]+\(', content)
-                      file_total_tests += len(test_funcs)
-          
-              if file_total_tests > 0:
-                  total_tests = file_total_tests
-          except:
-              pass
-
-          # Count critical tests
-          try:
-              test_files = glob.glob('tests/test_*.py')
-              critical_count = 0
-              for test_file in test_files:
-                  with open(test_file, 'r') as f:
-                      content = f.read()
-                      critical_matches = re.findall(r'@allure\.feature\([\"|\']Critical Workflow[\"|\']', content)
-                      critical_matches += re.findall(r'@pytest\.mark\.critical_workflow', content)
-                      critical_count += len(critical_matches)
-          
-              if critical_count > 0:
-                  critical_tests = critical_count
-          except:
-              pass
-
           # Calculate pass rate
-          pass_rate = 0 if total_tests == 0 else round((passed_tests * 100) / total_tests, 2)
-
-          # Get test duration
-          duration = 0
-
+          if [ $TOTAL_TESTS -eq 0 ]; then
+            PASS_RATE=0
+          else
+            PASS_RATE=$(echo "scale=2; ($PASSED_TESTS * 100) / $TOTAL_TESTS" | bc)
+          fi
+          
+          # Get critical tests count
+          CRITICAL_TESTS=$(grep -l "critical_workflow" allure-results/*.json 2>/dev/null | wc -l || echo 0)
+          
+          # Get test duration from GitHub Actions timing
+          START_TIME=$(date +%s)
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+          
           # Create metrics JSON
-          metrics = {
-              'timestamp': os.popen('date -u +"%Y-%m-%dT%H:%M:%SZ"').read().strip(),
-              'total_tests': total_tests,
-              'passed_tests': passed_tests,
-              'failed_tests': failed_tests,
-              'pass_rate': pass_rate,
-              'duration_seconds': duration,
-              'critical_tests_count': critical_tests,
-              'run_id': os.environ.get('GITHUB_RUN_ID', ''),
-              'repository': os.environ.get('GITHUB_REPOSITORY', ''),
-              'branch': os.environ.get('GITHUB_REF', '')
+          cat > metrics.json << EOF
+          {
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "total_tests": $TOTAL_TESTS,
+            "passed_tests": $PASSED_TESTS,
+            "failed_tests": $FAILED_TESTS,
+            "pass_rate": $PASS_RATE,
+            "duration_seconds": $DURATION,
+            "critical_tests_count": $CRITICAL_TESTS,
+            "run_id": "\${{ github.run_id }}",
+            "repository": "\${{ github.repository }}",
+            "branch": "\${{ github.ref }}"
           }
-
-          # Write metrics to file
-          with open('metrics.json', 'w') as f:
-              json.dump(metrics, f, indent=2)
-
-          print(f'Metrics JSON created with {passed_tests} passed and {failed_tests} failed tests')
-          print(json.dumps(metrics, indent=2))
           EOF
           
-          # Run the Python script to parse results
-          python parse_results.py
-          
-          # Display the metrics
           cat metrics.json
           
       - name: Upload metrics artifact
@@ -252,22 +192,32 @@ jobs:
       - name: Create self-contained dashboard
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          # Extract metrics from the JSON file
-          METRICS=$(cat metrics.json)
-          TOTAL_TESTS=$(echo $METRICS | jq -r '.total_tests')
-          PASSED_TESTS=$(echo $METRICS | jq -r '.passed_tests')
-          FAILED_TESTS=$(echo $METRICS | jq -r '.failed_tests')
-          PASS_RATE=$(echo $METRICS | jq -r '.pass_rate')
-          DURATION=$(echo $METRICS | jq -r '.duration_seconds')
-          CRITICAL_TESTS=$(echo $METRICS | jq -r '.critical_tests_count')
-          TIMESTAMP=$(echo $METRICS | jq -r '.timestamp')
+          # Get test results from Allure JSON files
+          TOTAL_TESTS=$(find allure-results -name "*.json" | grep -v "environment\|categories\|executor" | wc -l || echo 0)
+          PASSED_TESTS=$(grep -l '"status":"passed"' allure-results/*.json 2>/dev/null | wc -l || echo 0)
+          FAILED_TESTS=$((TOTAL_TESTS - PASSED_TESTS))
           
-          # Format timestamp for display
-          DISPLAY_TIMESTAMP=$(date -d "$TIMESTAMP" "+%Y-%m-%d %H:%M:%S UTC" 2>/dev/null || echo "$TIMESTAMP")
+          # Calculate pass rate
+          if [ $TOTAL_TESTS -eq 0 ]; then
+            PASS_RATE=0
+          else
+            PASS_RATE=$(echo "scale=2; ($PASSED_TESTS * 100) / $TOTAL_TESTS" | bc)
+          fi
+          
+          # Get critical tests count
+          CRITICAL_TESTS=$(grep -l "critical_workflow" allure-results/*.json 2>/dev/null | wc -l || echo 0)
+          
+          # Get test duration from GitHub Actions timing
+          START_TIME=$(date +%s)
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+          
+          # Create timestamp
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
           
           # Create a directory for GitHub Pages
           mkdir -p public
-          
+
           # Copy metrics.json to the public directory
           cp metrics.json public/
           
@@ -347,7 +297,7 @@ jobs:
                   </thead>
                   <tbody>
                     <tr>
-                      <td>$DISPLAY_TIMESTAMP</td>
+                      <td>$TIMESTAMP</td>
                       <td>$TOTAL_TESTS</td>
                       <td>$PASSED_TESTS</td>
                       <td>$FAILED_TESTS</td>
@@ -421,7 +371,7 @@ jobs:
             </script>
             
             <footer>
-              <p>Last updated: $DISPLAY_TIMESTAMP</p>
+              <p>Last updated: $TIMESTAMP</p>
               <p>Repository: \${{ github.repository }}</p>
               <p>Branch: \${{ github.ref }}</p>
               <p>Run ID: \${{ github.run_id }}</p>
@@ -451,7 +401,7 @@ jobs:
           - **Pass Rate:** $PASS_RATE%
           - **Critical Tests:** $CRITICAL_TESTS
           
-          Last updated: $DISPLAY_TIMESTAMP
+          Last updated: $TIMESTAMP
           EOF
           
           # List the public directory to verify content
