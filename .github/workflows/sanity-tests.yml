@@ -29,7 +29,7 @@ jobs:
           mkdir -p allure-results
           
           # Create collections compatibility module
-          cat > collections_compat.py << EOF
+          cat > collections_compat.py << 'EOF'
           """
           Python 3.10 Compatibility Layer for collections.Mapping
           
@@ -52,7 +52,7 @@ jobs:
           EOF
           
           # Create test runner script that imports compatibility layer first
-          cat > run_tests.py << EOF
+          cat > run_tests.py << 'EOF'
           import sys
           import os
           
@@ -70,8 +70,11 @@ jobs:
           sys.exit(pytest.main(["tests/", "--alluredir=allure-results"]))
           EOF
           
-          # Run tests with our compatibility layer
-          python run_tests.py
+          # Run tests with our compatibility layer and save output
+          python run_tests.py > pytest_output.txt 2>&1
+          
+          # Display the output for debugging
+          cat pytest_output.txt
         continue-on-error: true
         
       - name: Store Allure results
@@ -142,12 +145,22 @@ jobs:
       - name: Parse test metrics
         if: always()
         run: |
-          echo "Parsing test metrics..."
+          echo "Parsing test metrics from pytest output..."
           
-          # Get test results from Allure JSON files
-          TOTAL_TESTS=$(find allure-results -name "*.json" | grep -v "environment\|categories\|executor" | wc -l || echo 0)
-          PASSED_TESTS=$(grep -l '"status":"passed"' allure-results/*.json 2>/dev/null | wc -l || echo 0)
-          FAILED_TESTS=$((TOTAL_TESTS - PASSED_TESTS))
+          # Extract the test summary line from pytest output
+          SUMMARY=$(grep -o '[0-9]\+ failed, [0-9]\+ passed' pytest_output.txt || echo "0 failed, 0 passed")
+          echo "Extracted summary: $SUMMARY"
+          
+          # Parse the numbers from the summary
+          FAILED_TESTS=$(echo $SUMMARY | grep -o '[0-9]\+ failed' | grep -o '[0-9]\+' || echo 0)
+          PASSED_TESTS=$(echo $SUMMARY | grep -o '[0-9]\+ passed' | grep -o '[0-9]\+' || echo 0)
+          echo "Parsed counts: $PASSED_TESTS passed, $FAILED_TESTS failed"
+          
+          # Calculate total tests
+          TOTAL_TESTS=$((PASSED_TESTS + FAILED_TESTS))
+          
+          # Get critical tests count from the pytest output
+          CRITICAL_TESTS=$(grep -c "critical_workflow" pytest_output.txt || echo 0)
           
           # Calculate pass rate
           if [ $TOTAL_TESTS -eq 0 ]; then
@@ -155,9 +168,6 @@ jobs:
           else
             PASS_RATE=$(echo "scale=2; ($PASSED_TESTS * 100) / $TOTAL_TESTS" | bc)
           fi
-          
-          # Get critical tests count
-          CRITICAL_TESTS=$(grep -l "critical_workflow" allure-results/*.json 2>/dev/null | wc -l || echo 0)
           
           # Get test duration from GitHub Actions timing
           START_TIME=$(date +%s)
@@ -174,12 +184,13 @@ jobs:
             "pass_rate": $PASS_RATE,
             "duration_seconds": $DURATION,
             "critical_tests_count": $CRITICAL_TESTS,
-            "run_id": "\${{ github.run_id }}",
-            "repository": "\${{ github.repository }}",
-            "branch": "\${{ github.ref }}"
+            "run_id": "${{ github.run_id }}",
+            "repository": "${{ github.repository }}",
+            "branch": "${{ github.ref }}"
           }
           EOF
           
+          echo "Created metrics.json with actual test results:"
           cat metrics.json
           
       - name: Upload metrics artifact
@@ -192,25 +203,14 @@ jobs:
       - name: Create self-contained dashboard
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          # Get test results from Allure JSON files
-          TOTAL_TESTS=$(find allure-results -name "*.json" | grep -v "environment\|categories\|executor" | wc -l || echo 0)
-          PASSED_TESTS=$(grep -l '"status":"passed"' allure-results/*.json 2>/dev/null | wc -l || echo 0)
-          FAILED_TESTS=$((TOTAL_TESTS - PASSED_TESTS))
-          
-          # Calculate pass rate
-          if [ $TOTAL_TESTS -eq 0 ]; then
-            PASS_RATE=0
-          else
-            PASS_RATE=$(echo "scale=2; ($PASSED_TESTS * 100) / $TOTAL_TESTS" | bc)
-          fi
-          
-          # Get critical tests count
-          CRITICAL_TESTS=$(grep -l "critical_workflow" allure-results/*.json 2>/dev/null | wc -l || echo 0)
-          
-          # Get test duration from GitHub Actions timing
-          START_TIME=$(date +%s)
-          END_TIME=$(date +%s)
-          DURATION=$((END_TIME - START_TIME))
+          # Read metrics from the metrics.json file
+          METRICS_JSON=$(cat metrics.json)
+          TOTAL_TESTS=$(echo $METRICS_JSON | jq -r '.total_tests')
+          PASSED_TESTS=$(echo $METRICS_JSON | jq -r '.passed_tests')
+          FAILED_TESTS=$(echo $METRICS_JSON | jq -r '.failed_tests')
+          PASS_RATE=$(echo $METRICS_JSON | jq -r '.pass_rate')
+          DURATION=$(echo $METRICS_JSON | jq -r '.duration_seconds')
+          CRITICAL_TESTS=$(echo $METRICS_JSON | jq -r '.critical_tests_count')
           
           # Create timestamp
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
